@@ -3,6 +3,9 @@ import 'package:provider/provider.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import '../providers/tracker_provider.dart';
 import '../services/auth_service.dart';
+import '../services/notification_service.dart';
+import '../services/pdf_service.dart';
+import 'package:printing/printing.dart';
 import 'login_screen.dart';
 import 'user_goal_screen.dart';
 import 'package:weekly_streak/weekly_streak.dart';
@@ -192,8 +195,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   goals?.targetFats ?? 65,
                   const Color(0xFFFFB300),
                 ),
-                // Custom Widget
+
+                // Custom Widget: Streak & Action Buttons
                 Container(
+                  width: double.infinity,
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
                     color: Colors.white,
@@ -215,15 +220,116 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         streak: tracker.weeklyStreak,
                         activeColor: const Color(0xFF4CAF50),
                       ),
-                    ],
-                  ),
-                ),
+                      const SizedBox(height: 24),
+
+                      Wrap(
+                        spacing: 12.0,
+                        runSpacing: 12.0,
+                        children: [
+                          // 1. Notification Button
+                          ElevatedButton.icon(
+                            onPressed: () async {
+                              await NotificationService().showNotification(
+                                id: 0,
+                                title: 'Track your Lunch!',
+                                body:
+                                    'You have a great streak going. Log your meal now!',
+                              );
+                            },
+                            icon: const Icon(Icons.notifications_active),
+                            label: const Text('Test Notification'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+
+                          // 2. The NEW Fixed PDF Export Button
+                          ElevatedButton.icon(
+                            onPressed: () async {
+                              final userId = AuthService().currentUser?.uid;
+                              if (userId == null) return;
+
+                              // 1. Show loading circle
+                              showDialog(
+                                context: context,
+                                barrierDismissible: false,
+                                builder: (context) => const Center(
+                                  child: CircularProgressIndicator(
+                                    color: Colors.red,
+                                  ),
+                                ),
+                              );
+
+                              var generatedPdf;
+                              String today = DateTime.now()
+                                  .toIso8601String()
+                                  .split('T')
+                                  .first;
+
+                              // 2. FIRST TRY/CATCH: Only for database generation
+                              try {
+                                generatedPdf = await PDFService()
+                                    .generateDailyLogPDF(userId, today);
+                              } catch (e) {
+                                // If it fails (no logs found), pop the dialog and show the red error
+                                if (context.mounted) {
+                                  Navigator.pop(context);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'No meals found in the database for today!',
+                                      ),
+                                      backgroundColor: Colors.red,
+                                    ),
+                                  );
+                                }
+                                return; // STOP execution completely so it doesn't try to share
+                              }
+
+                              // 3. If generation succeeded, pop the loading dialog safely
+                              if (context.mounted) {
+                                Navigator.pop(context);
+                              }
+
+                              // 4. SECOND TRY/CATCH: Only for the native share menu
+                              try {
+                                await Printing.sharePdf(
+                                  bytes: await generatedPdf.save(),
+                                  filename: 'NutriTracker_$today.pdf',
+                                );
+                              } catch (e) {
+                                // If the emulator fails to open the share menu, show a warning, but DO NOT pop the screen!
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Could not open share menu. Emulators often block this!',
+                                      ),
+                                      backgroundColor: Colors.orange,
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                            icon: const Icon(Icons.picture_as_pdf),
+                            label: const Text('Export PDF'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red,
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ), // Closes Wrap
+                    ], // Closes children of inner Column
+                  ), // Closes inner Column
+                ), // Closes Container
                 const SizedBox(height: 32),
-              ],
-            ),
-          );
-        },
-      ),
-    );
+              ], // Closes children of outer Column
+            ), // Closes outer Column
+          ); // Closes SingleChildScrollView
+        }, // Closes builder
+      ), // Closes Consumer
+    ); // Closes Scaffold
   }
 }
